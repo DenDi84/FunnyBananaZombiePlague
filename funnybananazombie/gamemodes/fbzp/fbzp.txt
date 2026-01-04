@@ -1,0 +1,15 @@
+"fbzp"
+{
+	"base"		    "base"
+	"title"		    "FunnyBananaZP"
+	"maps"		    "^zp_|^zm_"
+	"category"	    "pvp"
+	"menusystem"	"1"
+
+    "lua_files" 
+    {
+        "init.lua"      "gamemode/init.lua"     
+        "shared.lua"    "gamemode/shared.lua"   
+        "cl_init.lua"   "gamemode/cl_init.lua"  
+    }
+}

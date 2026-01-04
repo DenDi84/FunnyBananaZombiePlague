@@ -1,0 +1,354 @@
+MENU = MENU or {};
+MENU.owner = LocalPlayer();
+MENU.background = {
+	color = Color( 255, 0, 0 ),
+	opacity = 0
+};
+MENU.notify = {
+	kill = {},
+	chat = {}
+};
+MENU.listen = {
+	Health = 0,
+	MaxHealth = 0,
+	Team = 0,
+	AmmoCount = 0,
+	MaxClip1 = 0,
+	Clip1 = 0,
+	Money = 0,
+	CountHuman = 0,
+	CountZombie = 0,
+	WeaponName = nil
+};
+MENU.temp = {
+	CountHuman = 0,
+	CountZombie = 0
+};
+
+MENU.time = {
+	use = CurTime()
+};
+MENU.activepage = nil;
+
+function MENU:Init()
+	self:SetSize( self:size().x, self:size().y );
+	self.frame = vgui.Create( "DPanel", self );
+	self.frame:SetSize( self:GetSize() );
+	self.frame:SetPopupStayAtBack( true );
+	self.html = vgui.Create( "DHTML" , self.frame );
+	self.html:Dock( FILL );
+	self.frame:SetBackgroundColor( ColorAlpha( self.background.color, self.background.opacity ) );
+	self.html:SetHTML( self:GetTemplate() );
+
+	self.html:AddFunction( "console", "closevotemap", function()
+		mainmenu:SetGUIInput( false );
+	end )
+	self.html:AddFunction( "console", "show", function( page, SteamID64 )
+		if ( page == "profile" ) then
+			self:Profile( SteamID64 );
+		end
+	end )
+	self.html:AddFunction( "console", "mute", function( SteamID64 )
+		local ply = player.GetBySteamID64( SteamID64 );
+		if ( IsValid(ply) ) then
+			ply:SetMuted( !ply:IsMuted() );
+		end
+	end )
+	self.html:AddFunction( "console", "close", function( page )
+		mainmenu:SetGUIInput( false );
+	end )
+	self.html:AddFunction( "console", "votemap", function( mapname )
+		LocalPlayer():ConCommand("votemap "..mapname);
+		chat.AddText( color().yellow, "Вы проголосовали за карту → ", color().white, mapname );
+	end )
+	self.html:AddFunction( "console", "sendmoney", function( amount, SteamID64 )
+		LocalPlayer():ConCommand("take_money "..amount.." "..SteamID64);
+	end )
+	self.html:AddFunction( "console", "admin", function( act, SteamID64 )
+		LocalPlayer():ConCommand("admin "..act.." "..SteamID64);
+	end )
+	self.html:AddFunction( "console", "buy", function( item )
+		LocalPlayer():ConCommand("buy "..item);
+	end )
+	self.html:AddFunction( "console", "weapon", function( weapontype, weaponname )
+		LocalPlayer():ConCommand("select_def_weapon "..weapontype.." "..weaponname);
+	end )
+end
+
+function MENU:Draw()
+	if ( !IsValid(self.owner) ) then 
+		self.owner = LocalPlayer();
+		return false;
+	end
+	local newlisten = {};
+	newlisten.Health = self.owner:Health();
+	newlisten.MaxHealth = self.owner:GetMaxHealth();
+	newlisten.Team = self.owner:Team();
+	newlisten.AmmoCount, newlisten.Clip1, newlisten.MaxClip1, newlisten.WeaponName = self:GetAmmo();
+	newlisten.Money = math.floor(self.owner:GetNWString("money", 0));
+	newlisten.CountHuman, newlisten.CountZombie = self:GetCounter();
+	local tablesend = {};
+	for k,v in pairs(self.listen) do
+		if ( newlisten[k] != v ) then 
+			tablesend[k] = newlisten[k]; 
+		end
+	end
+	self.listen = newlisten;
+	if( #table.GetKeys( tablesend ) > 0 ) then
+		self:Update( util.TableToJSON( tablesend ) );
+	end
+	self:CheckNotifiKill();
+end
+
+function MENU:CheckNotifiKill()
+	for k,v in pairs(self.notify.kill) do
+		if (v.time < CurTime() - 6) then
+			table.remove( self.notify.kill, k );
+		end
+	end
+end
+
+function MENU:Update( json )
+	self.html:Call( [[DataUpdate(']]..json..[[')]] );
+end
+
+function MENU:GetCounter()
+	return self.temp.CountHuman, self.temp.CountZombie;
+end
+
+function MENU:GetAmmo()
+	local weapon = self.owner:GetActiveWeapon();
+	if (weapon:IsWeapon()) then
+		local ammo = {
+			Clip1 = weapon:Clip1(),
+			AmmoCount = self.owner:GetAmmoCount( weapon:GetPrimaryAmmoType() ),
+			MaxClip1 = weapon:GetMaxClip1()
+		};
+		if (ammo.AmmoCount > 0 and ammo.Clip1 < 0) then
+			ammo.Clip1 = ammo.AmmoCount;
+			ammo.AmmoCount = -1;
+		end
+		return ammo.AmmoCount, ammo.Clip1, ammo.MaxClip1, weapon:GetClass();
+	else
+		return -1, -1, -1;
+	end
+	return redraw;
+end
+
+function MENU:SetData( name, value )
+	self.html:Call( [[SetData(']]..name..[[', ']]..value..[[')]] );
+end
+
+function MENU:SendChat( data )
+	self.html:Call( [[SendChat(']]..util.TableToJSON( data )..[[')]] );
+end 
+
+function MENU:size()
+	local size = {
+		x = surface.ScreenWidth(),
+		y = surface.ScreenHeight(),
+		center = {}
+	};
+	size.center = {
+		x = size.x / 2,
+		y = size.y / 2
+	};
+	return size; 
+end
+
+function MENU:Notify( data )
+	if (IsEmpty(data.type)) then return; end
+	if (data.type == "infection" or data.type == "kill") then
+		table.insert( self.notify.kill, data );
+		local senddata = {
+			attacker = { name = data.attacker, team = data.team.attacker },
+			target = { name = data.target, team = data.team.target },
+			weapon = data.inflictor
+		};
+		self.html:Call( [[KillNotify(']]..util.TableToJSON( senddata )..[[')]] );
+	end
+	if ( data.type == "finish" ) then
+		self:ShowSplash( data.text );
+	end
+	if ( data.type == "teamcounter" ) then
+		self.temp.CountHuman = data.CountHuman;
+		self.temp.CountZombie = data.CountZombie;
+	end
+end
+
+function MENU:ShowSplash( text ) 
+	self.html:Call( [[ShowSplash("]]..text..[[")]] );
+end
+function MENU:OnKeyCodeReleased( keyCode ) 
+	if ( keyCode == 93 and self.time.use < CurTime() ) then
+		self.time.use = CurTime() + 0.2;
+		mainmenu.html:Call( [[closeVotemap()]] );
+	end
+end
+function MENU:SetGUIInput( setbool )
+	self.frame:SetMouseInputEnabled( setbool );
+	self.frame:SetKeyBoardInputEnabled( setbool );
+end
+function MENU:ScoreBoard()
+	local senddata = {
+		human = {},
+		zombie = {},
+		spec = {}
+	};
+	local SetTable = function(v)
+		local name = string.Replace(v:GetName(), '"', '\\"');
+		name = string.Replace(name, "'", "\\'");
+		return {
+			Name = name,
+			SteamID64 = v:SteamID64() or "BOT",
+			Frags = v:Frags(),
+			Deaths = v:Deaths(),
+			Ping = v:Ping(),
+			Level = GetLevel(v:GetNWInt("exp", 0)).level,
+			Avatar = v:GetNWString("avatar", ""),
+			isMute = v:IsMuted()
+		};
+	end
+	for k,v in pairs( player:GetAll() ) do
+		if (v:Team() == 1 and v:Alive()) then
+			table.insert( senddata.human, SetTable(v) );
+		elseif (v:Team() == 2 and v:Alive()) then
+			table.insert(senddata.zombie, SetTable(v) );
+		else
+			table.insert(senddata.spec, SetTable(v) );
+		end
+	end
+	table.SortByMember(senddata.human, "Frags");
+	table.SortByMember(senddata.zombie, "Frags");
+	table.SortByMember(senddata.spec, "Frags");
+	self.html:Call( [[openScoreBoard(']]..util.TableToJSON( senddata )..[[')]] );
+end
+
+function MENU:Profile( SteamID64 )
+	local ply = player.GetBySteamID64( SteamID64 ) or player.GetBots()[1];
+	if (IsValid( ply )) then
+		local name = string.Replace(ply:GetName(), '"', '\\"');
+		name = string.Replace(name, "'", "\\'");
+		local senddata = {
+			Name = name,
+			Avatar = ply:GetNWString("avatar", ""),
+			Registration = ply:GetNWString("registration", "..."),
+			Top = 0,
+			Money = ply:GetNWInt("money", 0),
+			SteamID64 = ply:SteamID64() or "BOT",
+			Admin = self.owner:IsAdmin()
+		};
+		self.html:Call( [[openProfile(']]..util.TableToJSON( senddata )..[[')]] );
+	end
+end
+
+function MENU:Shop()
+	local myteam = self.owner:Team();
+	local senddata = {};
+	for k,v in pairs(SHOP.items) do
+		if ( v.access[myteam] ) then
+			table.insert(senddata, {
+				Name = v.name,
+				Command = k,
+				Price = v.price
+			} );
+		end
+	end
+	table.SortByMember(senddata, "Price");
+	self.html:Call( [[openShop(']]..util.TableToJSON( senddata )..[[')]] );
+end
+
+function MENU:GetTemplate()
+
+	return file.Read("data_static/zombieplague/menu/hud.txt", "GAME");
+
+end
+
+
+vgui.Register( "mainmenu", MENU );
+
+mainmenu = mainmenu or vgui.Create( "mainmenu" );
+mainmenu:Remove();
+mainmenu = vgui.Create( "mainmenu" );
+
+hook.Add("HUDPaint", "HUDPaint_DrawABox", function()
+	mainmenu:Draw();
+end )
+
+hook.Add("OnPlayerChat", "on.chat", function( ply, text, teamChat, isDead )
+	-- local send = {
+	-- 	Name = ply:GetName(),
+	-- 	Avatar = ply:GetNWString("avatar", ""),
+	-- 	Team = ply:Team(),
+	-- 	Text = text,
+	-- 	isTeam = teamChat,
+	-- 	isDead = isDead,
+	-- 	time = CurTime()
+	-- };
+	-- mainmenu:SendChat( send );
+	-- return true;
+end )
+
+hook.Add( "StartChat", "HasStartedTyping", function( isTeamChat )
+	mainmenu.html:Call( [[HideBlockByClassName('chat', false)]] );
+end )
+hook.Add( "FinishChat", "ClientFinishTyping", function()
+	mainmenu.html:Call( [[HideBlockByClassName('chat', true)]] );
+end)
+net.Receive( "EventsMessage", function() 
+	local data = net.ReadTable();
+	mainmenu:Notify( data );
+end );
+hook.Add( "PlayerButtonDown", "mainmenu.key", function( ply, button )
+	if (mainmenu.time.use < CurTime()) then
+		mainmenu.time.use = CurTime() + 0.2;
+		if (button == 93) then
+			mainmenu.activepage = 'votemap';
+			mainmenu.frame:MakePopup();
+			mainmenu:SetGUIInput( true );
+			mainmenu.html:Call( [[openVotemap()]] );
+		end
+	end
+end)
+
+function GM:ScoreboardShow()
+	mainmenu.frame:MakePopup();
+	mainmenu:SetGUIInput( true );
+	mainmenu:ScoreBoard();
+end
+
+function GM:ScoreboardHide()
+	mainmenu:SetGUIInput( false );
+	mainmenu.html:Call( [[closeScoreBoard()]] );
+end
+
+function GM:OnSpawnMenuOpen()
+	mainmenu.frame:MakePopup();
+	mainmenu:SetGUIInput( true );
+	mainmenu:Shop();
+end
+function GM:OnSpawnMenuClose()
+	mainmenu:SetGUIInput( false );
+	mainmenu.html:Call( [[closeShop()]] );
+end
+
+function GM:OnContextMenuOpen()
+	mainmenu.activepage = 'weaponshop';
+	mainmenu.frame:MakePopup();
+	mainmenu:SetGUIInput( true );
+	local primaryweapon = LocalPlayer():GetNWString("swep_primary", "weapon_l4d1_smgsilenced");
+	local secondaryweapon = LocalPlayer():GetNWString("swep_secondary", "weapon_l4d1_pistol");
+	mainmenu.html:Call( "openWeaponShop('"..primaryweapon.."', '"..secondaryweapon.."')" );	
+end
+function GM:OnContextMenuClose()
+	mainmenu:SetGUIInput( false );
+	mainmenu.html:Call( [[closeWeaponShop()]] );
+end
+
+
+concommand.Add( "zoom", function( ply, cmd, args )
+	mainmenu.activepage = 'votemap';
+	mainmenu.frame:MakePopup();
+	mainmenu:SetGUIInput( true );
+	mainmenu.html:Call( [[openVotemap()]] );
+end );

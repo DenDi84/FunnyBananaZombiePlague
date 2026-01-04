@@ -1,0 +1,13 @@
+{
+    "title": "FBZP Addon", 
+    "type": "gamemode",    
+    "tags": [
+        "gamemode"
+    ],
+    "ignore": [
+        "*.psd",
+        "*.vcproj",
+        "*.svn*",
+        "*.git*" 
+    ]
+}
